@@ -49,17 +49,22 @@ class LearnerFCNets2(nn.Module):
         1 output action/senssor
         
         '''
-        self.fc1 = nn.Linear(2, 10)
-        self.bn1 = nn.BatchNorm1d(10)
-        self.fc2 = nn.Linear(10, 10)
-        self.bn2 = nn.BatchNorm1d(10)
-        self.fc3 = nn.Linear(10, 1)
+        self.fc1 = nn.Linear(2, 4)
+        self.bn1 = nn.BatchNorm1d(4)
+        self.fc2 = nn.Linear(4, 4)
+        self.bn2 = nn.BatchNorm1d(4)
+        self.fc3 = nn.Linear(4, 1)
         
     def forward(self,x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         
-        return 20*torch.tanh(self.fc3(x))
+        return torch.tanh(self.fc3(x))
+    
+    def set_masks(self, masks):
+        self.fc1.weight.data = torch.mul(self.fc1.weight.data, masks['fc1.weight'])
+        self.fc2.weight.data = torch.mul(self.fc2.weight.data, masks['fc2.weight'])
+        self.fc3.weight.data = torch.mul(self.fc3.weight.data, masks['fc3.weight'])
     
 
 class LearnerConvNetCSS(nn.Module):
@@ -122,39 +127,83 @@ class LearnerConvNetCCS(nn.Module):
         The learner that has one or more camera inputs:
             CCS - Camera Camera to Sensor/action
             The learners recieves: 
-                2 input from camera, 600x800 rgb array 
+                2 input from camera, 240X320X3 
                 1 output action/senssor
         '''
     
         self.conv1 = nn.Conv2d(3, 10, kernel_size = 1, stride = 1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(10, 10, kernel_size = 1, stride = 1)
-        self.conv3 = nn.Conv2d(10, 10, kernel_size = 1, stride = 1)
-        self.fc1 = nn.Linear(10*50*75, 26250)
-        self.fc2 = nn.Linear(26250, 13125)
-        self.fc3 = nn.Linear(13125, 3281)
-        self.fc4 = nn.Linear(3281, 410)
-        self.fc5 = nn.Linear(410, 1)
+        self.conv2 = nn.Conv2d(10, 10, kernel_size = 3, stride = 2)
+        self.conv3 = nn.Conv2d(10, 10, kernel_size = 5, stride = 2)
+        self.fc1 = nn.Linear(20*6*9, 260)
+        self.fc2 = nn.Linear(260, 125)
+        self.fc3 = nn.Linear(125, 80)
+        self.fc4 = nn.Linear(80, 16)
+        self.fc5 = nn.Linear(16, 1)
        
     def forward(self, x, y):
         image1 = x
         image2 = y 
-        image1 = self.pool(F.relu(self.conv1(image1)))
-        image2 = self.pool(F.relu(self.conv1(image2)))
-        image1 = self.pool(F.relu(self.conv2(image1)))
-        image2 = self.pool(F.relu(self.conv2(image2)))
-        image1 = self.pool(F.relu(self.conv3(image1)))
-        image2 = self.pool(F.relu(self.conv3(image2)))
-        image1 = image1.view(10*50*75)
-        image2 = image2.view(10*50*75)
+        image1 = self.pool(F.relu(self.conv1(image1))) #after it is 120X160X10
+        image2 = self.pool(F.relu(self.conv1(image2))) #after it is 120X160X10
+        image1 = self.pool(F.relu(self.conv2(image1))) #29X39X10
+        image2 = self.pool(F.relu(self.conv2(image2))) #29X39X10
+        image1 = self.pool(F.relu(self.conv3(image1))) #6X9X10
+        image2 = self.pool(F.relu(self.conv3(image2))) #6X9X10
+        image1 = image1.view(image1.size(0), 10*6*9)
+        image2 = image2.view(image2.size(0), 10*6*9)
         combined_input = torch.cat((image1, image2), -1)
         combined_input = F.relu(self.fc1(combined_input))
         combined_input = F.relu(self.fc2(combined_input))
         combined_input = F.relu(self.fc3(combined_input))
         combined_input = F.relu(self.fc4(combined_input))
-        combined_input = F.relu(self.fc5(combined_input))
+        combined_input = self.fc5(combined_input)
         
-        return torch.tanh(combined_input)
+        return combined_input
+    
+class LearnerConvNetCCSOneInput(nn.Module):
+    def __init__(self):
+        super(LearnerConvNetCCSOneInput, self).__init__()
+        '''
+        The learner that has one or more camera inputs:
+            CCS - Camera Camera to Sensor/action
+            The learners recieves: 
+                1 input from camera which is a combination of two 240X320X3
+                images of time t and t-1. To learn:
+                1 output action/senssor
+        '''
+    
+        self.conv1 = nn.Conv2d(3, 3, kernel_size = 1, stride = 1)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(3, 5, kernel_size = 3, stride = 2)
+        self.conv3 = nn.Conv2d(5, 10, kernel_size = 5, stride = 2)
+        self.fc1 = nn.Linear(20*6*9, 260)
+        self.fc2 = nn.Linear(260, 125)
+        self.fc3 = nn.Linear(125, 80)
+        self.fc4 = nn.Linear(80, 16)
+        self.fc5 = nn.Linear(16, 2)
+       
+    def forward(self, x):
+        image1 = x[:, :, :240, :]
+        image2 = x[:, :, 240:, :] 
+        image1 = self.pool(F.relu(self.conv1(image1))) #after it is 120X160X10
+        image2 = self.pool(F.relu(self.conv1(image2))) #after it is 120X160X10
+        image1 = self.pool(F.relu(self.conv2(image1))) #29X39X10
+        image2 = self.pool(F.relu(self.conv2(image2))) #29X39X10
+        image1 = self.pool(F.relu(self.conv3(image1))) #6X9X10
+        image2 = self.pool(F.relu(self.conv3(image2))) #6X9X10
+        image1 = image1.view(image1.size(0), 10*6*9)
+        image2 = image2.view(image2.size(0), 10*6*9)
+        combined_input = torch.cat((image1, image2), -1)
+        combined_input = F.relu(self.fc1(combined_input))
+        combined_input = F.relu(self.fc2(combined_input))
+        combined_input = F.relu(self.fc3(combined_input))
+        combined_input = F.relu(self.fc4(combined_input))
+        combined_input = self.fc5(combined_input)
+        
+        return combined_input
+    
+
 '''
 class LearnerConvNetSSC(nn.Module):
     
