@@ -6,7 +6,63 @@ import torch.nn.functional as F
 from pruning.utils import prune_rate, arg_nonzero_min
 
 
-def weight_prune(model, pruning_perc, threshold=None):
+def neuron_prune(model, pruning_perc = 10, threshold=None):
+    '''
+    Prune a neuron, i.e. all contributing weights to a spacific neuron will be 
+    zeroed out. Be aware that this works only with fully connected layers named
+    fc1, fc2, and so on. 
+    '''    
+    all_weights = []
+    for p in model.parameters():
+        if len(p.data.size()) != 1:
+            all_weights += list(p.cpu().data.abs().numpy().flatten())
+    if threshold is None:
+        threshold = np.percentile(np.array(all_weights), pruning_perc)
+    
+    #calculating the sum of the neuron input (row) and output (column) to be 
+    #able to evaluate the strength of the neuron for prunning.
+    
+    row_sum = {}
+    column_sum = {}
+    
+    for name, p in model.named_parameters(): #Creates a sum for each raw and column
+        if p.dim() == 2: #the FC parts are two dimentional (conv are four)
+            row_sum[name] = torch.abs(torch.sum(p, dim=1))
+            column_sum[name] = torch.abs(torch.sum(p, dim=0))
+    '''        
+    for name, p in model.named_parameters(): ##Creates a sum for each column
+        if p.dim()>1:
+            column_sum[name] = torch.abs(torch.sum(p, dim=0))
+    '''
+    
+    prunned_neurons = [] #a place to store the index of prunnes neurons        
+    for i in range((len(row_sum)-1)):
+        neuron_strength = row_sum['fc' + str(i+1) + '.weight'] + column_sum['fc' + str(i+2) + '.weight']
+        for j in range(len(neuron_strength)):
+            if neuron_strength[j] < threshold:
+                #print(neuron_strength[j])
+                #if neuron_strength[j] == 0:
+                #    break
+                #print('prunning layer:', i+1, 'neuron:', j)
+                prunned_neurons.append([i+1,j]) #here i is the layer of the row (input) 
+                                            # and j is index of the row/column. So [1,2] means the second neuron of the first hidden layer, so we are zeroing the second row of the first weights and the second column of the second weights.
+                                            
+    # generate mask
+    masks = {}
+    #creating a mask of ones the size of the weight matrixs
+    for name, p in model.named_parameters():
+        if p.dim() > 1:
+            masks[name] = torch.ones(p.size())
+    #zeroing out the appropiate row and column     
+    if len(prunned_neurons) > 1:
+        for neuron in prunned_neurons:
+            masks['fc' + str(neuron[0]) + '.weight'][neuron[1], :] = 0
+            masks['fc' + str(neuron[0] + 1) + '.weight'][:, neuron[1]] = 0
+        
+            
+    return masks, prunned_neurons
+
+def weight_prune(model, pruning_perc):
     '''
     Prune pruning_perc% weights globally (not layer-wise)
     arXiv: 1606.09274
@@ -15,8 +71,7 @@ def weight_prune(model, pruning_perc, threshold=None):
     for p in model.parameters():
         if len(p.data.size()) != 1:
             all_weights += list(p.cpu().data.abs().numpy().flatten())
-    if threshold is None:
-        threshold = np.percentile(np.array(all_weights), pruning_perc)
+    threshold = np.percentile(np.array(all_weights), pruning_perc)
 
     # generate mask
     masks = []
@@ -25,7 +80,6 @@ def weight_prune(model, pruning_perc, threshold=None):
             pruned_inds = p.data.abs() > threshold
             masks.append(pruned_inds.float())
     return masks
-
 
 def prune_one_filter(model, masks):
     '''
