@@ -110,7 +110,7 @@ def to_categorical(y, num_classes):
     
 #Dividing the image into singular pixals to learn for the first layer
 
-def create_pixel_vecCC(imaget, imagetm1, rescale_image = False):
+def create_pixel_vecCC(imaget, imagetm1, sensor_output, rescale_image = False, binary_action = False):
     '''
     This will take the two images from the camera at time t and t-1
     and will output a tensor of size [HxWxC, 2].
@@ -127,16 +127,24 @@ def create_pixel_vecCC(imaget, imagetm1, rescale_image = False):
     
     imaget, imagetm1 = torch.from_numpy(imaget), torch.from_numpy(imagetm1)    
     pixel_vecCC = torch.empty([imaget.size()[0] * imaget.size()[1] * imaget.size()[2], 2])
+    target = torch.empty([imaget.size()[0] * imaget.size()[1] * imaget.size()[2], 1])
     
     imaget = torch.reshape(imaget, [imaget.size()[0] * imaget.size()[1] * imaget.size()[2]])
     imagetm1 = torch.reshape(imagetm1, [imagetm1.size()[0] * imagetm1.size()[1] * imagetm1.size()[2]])
     
+    if binary_action:
+        if sensor_output != 0:
+            sensor_output = torch.tensor([1])
+        else:
+            sensor_output = torch.tensor([0])
+            
     pixel_vecCC[:, 0] = imaget
     pixel_vecCC[:, 1] = imagetm1
+    target[:,:] = sensor_output
     
-    return pixel_vecCC
+    return pixel_vecCC, target
 
-def create_pixel_vecCS(image_in, sensor_input, image_out, rescale_image = False):
+def create_pixel_vecCS(image_in, sensor_input, image_out, rescale_image = False, binary_action = False):
     '''
     This will take the images from the camera and a sensor input 
     and will output a tensor of size [HxWxC, 2].
@@ -144,7 +152,7 @@ def create_pixel_vecCS(image_in, sensor_input, image_out, rescale_image = False)
     Rescale is defult to no, if we choose to rescale it will rescale by factor 
     6
     '''
-    image_in = image_in.data.numpy()
+    image_in, image_out = image_in.data.numpy(), image_out.data.numpy()
     if rescale_image:
         image_in = rescale(image_in, 1.0/6.0, anti_aliasing=True, multichannel=True)
         image_out = rescale(image_out, 1.0/6.0, anti_aliasing=True, multichannel=True)
@@ -154,9 +162,14 @@ def create_pixel_vecCS(image_in, sensor_input, image_out, rescale_image = False)
     pixel_vecCS = torch.empty([image_in.size()[0] * image_in.size()[1] * image_in.size()[2], 2])
     
     image_in = torch.reshape(image_in, [image_in.size()[0] * image_in.size()[1] * image_in.size()[2]])
-    image_out = torch.reshape(image_out, [image_in.size()[0] * image_in.size()[1] * image_in.size()[2]])
+    image_out = torch.reshape(image_out, [image_out.size()[0] * image_out.size()[1] * image_out.size()[2]])
 
-    
+    if binary_action:
+        if sensor_input != 0:
+            sensor_input = torch.tensor([1])
+        else:
+            sensor_input = torch.tensor([0])
+            
     pixel_vecCS[:, 0] = image_in
     pixel_vecCS[:, 1] = sensor_input
     
@@ -165,7 +178,7 @@ def create_pixel_vecCS(image_in, sensor_input, image_out, rescale_image = False)
     return pixel_vecCS, target 
 
 
-def ChooseActionNoBrain(observation, percent_zero = 0.5):
+def ChooseActionNoBrain(observation, percent_zero = 0.2):
     times, times2, times3, times4 = 0, 0, 0, 0
     f, y = 0.0, 0.0
     if observation[0][0]>0.9:
@@ -202,9 +215,9 @@ def ChooseActionNoBrain(observation, percent_zero = 0.5):
         times4 += -1
     else:
         y = random.randrange(-2000,2000)/100
-    if random.randrange(0,100)/100 > percent_zero:
+    if random.randrange(0,100)/100 < percent_zero:
         f = 0.0
-    if random.randrange(0,100)/100 >percent_zero:
+    if random.randrange(0,100)/100 < percent_zero:
         y = 0.0
     action = [f, y]
     return action    
