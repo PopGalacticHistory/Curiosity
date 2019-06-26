@@ -11,7 +11,8 @@ def neuron_prune(model, pruning_perc = 10, threshold=None):
     Prune a neuron, i.e. all contributing weights to a spacific neuron will be 
     zeroed out. Be aware that this works only with fully connected layers named
     fc1, fc2, and so on. 
-    '''    
+    '''   
+    viable = True
     all_weights = []
     for p in model.parameters():
         if len(p.data.size()) != 1:
@@ -24,9 +25,9 @@ def neuron_prune(model, pruning_perc = 10, threshold=None):
     
     row_sum = {}
     column_sum = {}
-    
     for name, p in model.named_parameters(): #Creates a sum for each raw and column
         if p.dim() == 2: #the FC parts are two dimentional (conv are four)
+            
             row_sum[name] = torch.abs(torch.sum(p, dim=1))
             column_sum[name] = torch.abs(torch.sum(p, dim=0))
     '''        
@@ -34,10 +35,12 @@ def neuron_prune(model, pruning_perc = 10, threshold=None):
         if p.dim()>1:
             column_sum[name] = torch.abs(torch.sum(p, dim=0))
     '''
-    
+    prunned_neurons_dict = {}
     prunned_neurons = [] #a place to store the index of prunnes neurons        
     for i in range((len(row_sum)-1)):
         neuron_strength = row_sum['fc' + str(i+1) + '.weight'] + column_sum['fc' + str(i+2) + '.weight']
+        prunned_neurons_dict[i+1] = 0 
+        
         for j in range(len(neuron_strength)):
             if neuron_strength[j] < threshold:
                 #print(neuron_strength[j])
@@ -45,8 +48,23 @@ def neuron_prune(model, pruning_perc = 10, threshold=None):
                 #    break
                 #print('prunning layer:', i+1, 'neuron:', j)
                 prunned_neurons.append([i+1,j]) #here i is the layer of the row (input) 
-                                            # and j is index of the row/column. So [1,2] means the second neuron of the first hidden layer, so we are zeroing the second row of the first weights and the second column of the second weights.
-                                            
+                                            # and j is index of the row/column. So 
+                                            #[1,2] means the second neuron of the first hidden layer, 
+                                            #so we are zeroing the second row of the first weights 
+                                            #and the second column of the second weights.
+                prunned_neurons_dict[i+1] += 1 #counts the number of prunned neurons per layer
+    
+    count = 1            
+    for p in model.parameters():
+        if count == len(row_sum) - 1:
+            continue
+        else:
+            if p.dim() == 2:
+                if max(p.size()) == prunned_neurons_dict[count]:
+                    viable = False
+                count += 1
+        
+                                                
     # generate mask
     masks = {}
     #creating a mask of ones the size of the weight matrixs
@@ -59,8 +77,8 @@ def neuron_prune(model, pruning_perc = 10, threshold=None):
             masks['fc' + str(neuron[0]) + '.weight'][neuron[1], :] = 0
             masks['fc' + str(neuron[0] + 1) + '.weight'][:, neuron[1]] = 0
         
-            
-    return masks, prunned_neurons
+    
+    return masks, prunned_neurons, viable 
 
 def weight_prune(model, pruning_perc):
     '''
